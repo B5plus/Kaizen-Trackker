@@ -1,0 +1,296 @@
+/* ============================================================
+   HelpDesk Design System — Foundations
+   Enterprise IT Helpdesk for Oracle APEX
+   ============================================================ */
+
+/* ---------- Webfonts ----------
+   Inter for UI, JetBrains Mono for ticket IDs / codes / metadata.
+   Using Google Fonts CDN (no local ttfs yet — flagged in README).
+*/
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ============================================================
+     COLORS — Brand
+     Deep "service blue" primary, calm on the eyes for 8-hour shifts.
+     Paired with Oracle-adjacent neutrals.
+     ============================================================ */
+  --brand-50:  #eef5fc;
+  --brand-100: #d6e8f7;
+  --brand-200: #aed0ee;
+  --brand-300: #7fb3e2;
+  --brand-400: #4f93d2;
+  --brand-500: #2575bd;   /* primary */
+  --brand-600: #1a5d9c;
+  --brand-700: #154a7d;
+  --brand-800: #123c66;
+  --brand-900: #0f2f50;
+
+  --primary: var(--brand-500);
+  --primary-hover: var(--brand-600);
+  --primary-press: var(--brand-700);
+  --primary-soft: var(--brand-50);
+
+  /* ============================================================
+     COLORS — Neutrals
+     Slate-leaning greys. Strong 900 for headlines, subtle 50 for bgs.
+     ============================================================ */
+  --n-0:   #ffffff;
+  --n-25:  #fbfcfd;
+  --n-50:  #f6f8fa;
+  --n-100: #eef1f5;
+  --n-200: #e1e6ed;
+  --n-300: #c8d0dc;
+  --n-400: #9ba5b5;
+  --n-500: #6b778c;
+  --n-600: #4b5668;
+  --n-700: #353d4b;
+  --n-800: #232a36;
+  --n-900: #131821;
+
+  /* ============================================================
+     COLORS — Semantic (status-driven; maps to ticket lifecycle)
+     ============================================================ */
+  /* Submitted — neutral blue-grey, pending triage */
+  --status-submitted-fg: #1a5d9c;
+  --status-submitted-bg: #e6f0fa;
+  --status-submitted-bd: #b9d5ee;
+
+  /* WIP / In Progress — amber, active work */
+  --status-wip-fg: #8a5a00;
+  --status-wip-bg: #fff4d6;
+  --status-wip-bd: #f4d88a;
+
+  /* On Hold — muted grey, waiting */
+  --status-hold-fg: #4b5668;
+  --status-hold-bg: #eef1f5;
+  --status-hold-bd: #c8d0dc;
+
+  /* Resolved — success green */
+  --status-resolved-fg: #1f6a3c;
+  --status-resolved-bg: #e4f5eb;
+  --status-resolved-bd: #a7dcba;
+
+  /* Closed — dark neutral, archived */
+  --status-closed-fg: #2a2f3a;
+  --status-closed-bg: #e1e6ed;
+  --status-closed-bd: #9ba5b5;
+
+  /* Reopened — red-orange, needs attention */
+  --status-reopen-fg: #9a2626;
+  --status-reopen-bg: #fbe5e5;
+  --status-reopen-bd: #f1b4b4;
+
+  /* Functional semantics */
+  --success: #2e9a55;
+  --success-bg: #e4f5eb;
+  --warning: #c78500;
+  --warning-bg: #fff4d6;
+  --danger: #c53030;
+  --danger-bg: #fbe5e5;
+  --info: var(--brand-500);
+  --info-bg: var(--brand-50);
+
+  /* Priority */
+  --priority-critical: #c53030;
+  --priority-high: #d97706;
+  --priority-medium: #2575bd;
+  --priority-low: #6b778c;
+
+  /* ============================================================
+     FOREGROUND / BACKGROUND tokens (semantic)
+     ============================================================ */
+  --fg-1: var(--n-900);   /* primary text */
+  --fg-2: var(--n-700);   /* secondary text */
+  --fg-3: var(--n-500);   /* muted / captions / metadata */
+  --fg-4: var(--n-400);   /* placeholders / disabled */
+  --fg-on-primary: #ffffff;
+
+  --bg-app: var(--n-50);      /* app shell background */
+  --bg-surface: var(--n-0);   /* cards, panels */
+  --bg-sunken: var(--n-100);  /* nested surfaces, table zebra */
+  --bg-hover: var(--n-100);
+  --bg-selected: var(--brand-50);
+
+  --border-subtle: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-focus: var(--brand-500);
+
+  /* ============================================================
+     TYPOGRAPHY
+     ============================================================ */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Type scale — balanced enterprise density */
+  --fs-xs:   11px;   /* micro labels, tag counts */
+  --fs-sm:   12px;   /* captions, metadata */
+  --fs-base: 14px;   /* body default (enterprise standard) */
+  --fs-md:   16px;   /* emphasized body */
+  --fs-lg:   18px;   /* sub-headings */
+  --fs-xl:   22px;   /* card titles, h3 */
+  --fs-2xl:  28px;   /* page titles, h2 */
+  --fs-3xl:  36px;   /* hero headings, h1 */
+  --fs-4xl:  44px;   /* dashboard KPI numerals */
+
+  --lh-tight:  1.2;
+  --lh-snug:   1.35;
+  --lh-normal: 1.5;
+  --lh-loose:  1.65;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --tracking-caps: 0.08em;
+
+  /* ============================================================
+     SPACING — 4px base scale
+     ============================================================ */
+  --sp-0: 0;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+
+  /* ============================================================
+     RADII
+     ============================================================ */
+  --r-none: 0;
+  --r-sm: 3px;   /* pills, chips, input controls */
+  --r-md: 6px;   /* buttons, cards */
+  --r-lg: 8px;   /* modals, large panels */
+  --r-xl: 12px;  /* hero cards */
+  --r-pill: 999px;
+
+  /* ============================================================
+     SHADOWS — subtle, enterprise-appropriate
+     ============================================================ */
+  --shadow-xs: 0 1px 1px rgba(19, 24, 33, 0.04);
+  --shadow-sm: 0 1px 2px rgba(19, 24, 33, 0.06), 0 1px 1px rgba(19, 24, 33, 0.03);
+  --shadow-md: 0 2px 6px rgba(19, 24, 33, 0.08), 0 1px 2px rgba(19, 24, 33, 0.04);
+  --shadow-lg: 0 8px 24px rgba(19, 24, 33, 0.10), 0 2px 6px rgba(19, 24, 33, 0.06);
+  --shadow-xl: 0 16px 40px rgba(19, 24, 33, 0.14);
+  --shadow-focus: 0 0 0 3px rgba(37, 117, 189, 0.25);
+  --shadow-focus-danger: 0 0 0 3px rgba(197, 48, 48, 0.22);
+
+  /* ============================================================
+     MOTION
+     ============================================================ */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+
+  /* ============================================================
+     LAYOUT
+     ============================================================ */
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 64px;
+  --topbar-h: 56px;
+  --content-max: 1440px;
+  --form-max: 720px;
+
+  --z-base: 1;
+  --z-sticky: 10;
+  --z-dropdown: 100;
+  --z-modal: 1000;
+  --z-toast: 1100;
+}
+
+/* ============================================================
+   SEMANTIC TYPE CLASSES
+   ============================================================ */
+.t-display {
+  font-family: var(--font-sans);
+  font-size: var(--fs-3xl);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+}
+.t-h1 {
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+}
+.t-h2 {
+  font-size: var(--fs-xl);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-1);
+}
+.t-h3 {
+  font-size: var(--fs-lg);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-1);
+}
+.t-body {
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  font-weight: var(--fw-regular);
+  color: var(--fg-1);
+}
+.t-body-strong {
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-1);
+}
+.t-caption {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--fg-3);
+}
+.t-eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-3);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+.t-kpi {
+  font-family: var(--font-sans);
+  font-size: var(--fs-4xl);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   RESET-ISH BASELINE
+   ============================================================ */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  color: var(--fg-1);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01';
+}

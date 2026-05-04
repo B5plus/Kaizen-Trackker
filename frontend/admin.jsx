@@ -1,0 +1,513 @@
+// Trackker — Admin page (developer): manage nodes
+const { useState, useEffect, useRef, useMemo } = React;
+const h = window.helpers;
+
+// Compute clean layered left-to-right positions from node connections.
+// Roots (no incoming edges) -> column 0; their targets -> column 1; etc.
+function computeAutoLayout(nodes) {
+  const NODE_W = 260, NODE_H = 168;
+  const COL_W = NODE_W + 100;
+  const ROW_H = NODE_H + 60;
+  const START_X = 80, START_Y = 80;
+
+  const inDeg = {};
+  nodes.forEach(n => { inDeg[n.id] = 0; });
+  nodes.forEach(n => (n.connections || []).forEach(t => {
+    if (inDeg[t] !== undefined) inDeg[t]++;
+  }));
+
+  const level = {};
+  const queue = [];
+  nodes.forEach(n => { if (inDeg[n.id] === 0) { level[n.id] = 0; queue.push(n.id); } });
+  const byId = {}; nodes.forEach(n => { byId[n.id] = n; });
+  while (queue.length) {
+    const id = queue.shift();
+    (byId[id].connections || []).forEach(t => {
+      if (!byId[t]) return;
+      const next = level[id] + 1;
+      if (level[t] === undefined || next > level[t]) { level[t] = next; queue.push(t); }
+    });
+  }
+  nodes.forEach(n => { if (level[n.id] === undefined) level[n.id] = 0; });
+
+  const byLevel = {};
+  nodes.forEach(n => {
+    const lv = level[n.id];
+    (byLevel[lv] = byLevel[lv] || []).push(n);
+  });
+  Object.values(byLevel).forEach(g => g.sort((a, b) => (a.title || '').localeCompare(b.title || '')));
+
+  const positions = {};
+  Object.entries(byLevel).forEach(([lv, group]) => {
+    const x = START_X + Number(lv) * COL_W;
+    group.forEach((n, i) => { positions[n.id] = { x, y: START_Y + i * ROW_H }; });
+  });
+  return positions;
+}
+
+const Avatar = ({ name, size = 'sm' }) => (
+  <div className={`avatar ${size}`} style={{ background: h.avatarBg(name) }} title={name}>
+    {h.initials(name)}
+  </div>
+);
+
+const Topbar = ({ onLogout }) => {
+  useEffect(() => { window.lucide && window.lucide.createIcons(); });
+  return (
+    <header className="topbar">
+      <div className="brand">
+        <div className="logo">T</div>
+        <div>
+          <div className="name">Trackker</div>
+          <div className="sub">Admin</div>
+        </div>
+      </div>
+      <div className="spacer" />
+      <nav className="nav-tabs">
+        <a href="/"><i data-lucide="git-branch"></i> Public</a>
+        <a href="/admin.html" className="active"><i data-lucide="settings"></i> Admin</a>
+      </nav>
+      <div className="view-pill"><i data-lucide="shield-check"></i> Admin</div>
+      <button className="btn btn-secondary btn-sm" onClick={onLogout}>
+        <i data-lucide="log-out"></i> Sign out
+      </button>
+    </header>
+  );
+};
+
+const Login = ({ onAuth }) => {
+  const [pw, setPw] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { window.lucide && window.lucide.createIcons(); }, [error]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError('');
+    const ok = await window.api.checkPassword(pw);
+    setBusy(false);
+    if (!ok) return setError('Incorrect password.');
+    window.api.setPw(pw);
+    onAuth();
+  };
+
+  return (
+    <div className="login-wrap">
+      <form className="login-card" onSubmit={submit}>
+        <div className="logo">T</div>
+        <h1>Sign in to admin</h1>
+        <p>Enter the team password to manage Kaizen nodes.</p>
+        <div className="field">
+          <label>Password</label>
+          <input
+            className="inp" type="password" autoFocus
+            value={pw} onChange={e => setPw(e.target.value)}
+            placeholder="••••••••"
+          />
+        </div>
+        <button className="btn btn-primary" type="submit" disabled={busy || !pw} style={{ marginTop: 14, width: '100%', justifyContent: 'center' }}>
+          {busy ? 'Checking…' : <><i data-lucide="log-in"></i> Sign in</>}
+        </button>
+        {error && (
+          <div className="login-error">
+            <i data-lucide="alert-triangle"></i> {error}
+          </div>
+        )}
+      </form>
+    </div>
+  );
+};
+
+const FilterBar = ({ filter, setFilter, counts }) => {
+  const chips = [
+    { id: 'all', label: 'All' },
+    { id: 'progress', label: 'In progress' },
+    { id: 'completed', label: 'Completed' },
+    { id: 'notstarted', label: 'Not started' },
+  ];
+  return (
+    <div className="filter-bar">
+      <div className="filter-group">
+        {chips.map(c => (
+          <button key={c.id} className={`filter-chip ${filter === c.id ? 'active' : ''}`} onClick={() => setFilter(c.id)}>
+            {c.label}<span className="count">{counts[c.id]}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const AddNode = ({ onAdd }) => {
+  useEffect(() => { window.lucide && window.lucide.createIcons(); });
+  const [title, setTitle] = useState('');
+  const [developer, setDeveloper] = useState('');
+  const [deadline, setDeadline] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setBusy(true);
+    try {
+      await onAdd({
+        title: title.trim(),
+        developer: developer.trim() || 'Unassigned',
+        deadline: deadline || null,
+      });
+      setTitle(''); setDeveloper(''); setDeadline('');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <form onSubmit={submit} style={{
+      display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr auto',
+      gap: 10, padding: '14px 16px', marginBottom: 14,
+      background: 'rgba(88, 168, 255, 0.04)',
+      border: '1px dashed rgba(88, 168, 255, 0.28)',
+      borderRadius: 10,
+    }}>
+      <div className="field">
+        <label style={{ color: 'var(--accent)' }}>New node title</label>
+        <input className="inp" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Backend API" />
+      </div>
+      <div className="field">
+        <label style={{ color: 'var(--accent)' }}>Developer</label>
+        <input className="inp" value={developer} onChange={e => setDeveloper(e.target.value)} placeholder="e.g. Sarah Chen" />
+      </div>
+      <div className="field">
+        <label style={{ color: 'var(--accent)' }}>Deadline</label>
+        <input className="inp" type="date" value={deadline} onChange={e => setDeadline(e.target.value)} />
+      </div>
+      <div className="field" style={{ alignSelf: 'end' }}>
+        <button className="btn btn-primary" type="submit" disabled={busy || !title.trim()}>
+          <i data-lucide="plus"></i> Add node
+        </button>
+      </div>
+    </form>
+  );
+};
+
+const NodeRow = ({ node, allNodes, onUpdate, onDelete, toast }) => {
+  const [editing, setEditing] = useState(false);
+  const [connSearch, setConnSearch] = useState('');
+  useEffect(() => { window.lucide && window.lucide.createIcons(); }, [node, editing, connSearch]);
+
+  const status = h.effectiveStatus(node);
+  const dl = h.deadlineDisplay(node);
+
+  const update = async (patch) => {
+    try { await onUpdate(node.id, patch); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+
+  const setStatus = (st) => {
+    const patch = { status: st };
+    if (st === 'completed') patch.progress = 100;
+    if (st === 'notstarted') patch.progress = 0;
+    update(patch);
+  };
+
+  const toggleConnection = (id) => {
+    const set = new Set(node.connections || []);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    update({ connections: [...set] });
+  };
+
+  return (
+    <div className={`node-row-card ${status}`}>
+      <div className="nrc-top">
+        <div className="nrc-name">
+          <div className="row1">
+            <span className={`k-badge ${status}`}>
+              <span className="dot"></span>{h.statusLabel(status)}
+            </span>
+          </div>
+          <div className="title">{node.title}</div>
+          {node.description && <div className="desc">{node.description}</div>}
+        </div>
+
+        <div className="nrc-cell">
+          <div className="lbl"><i data-lucide="user"></i> Developer</div>
+          <div className="dev-row">
+            <Avatar name={node.developer} />
+            <span className="val">{node.developer || 'Unassigned'}</span>
+          </div>
+        </div>
+
+        <div className="nrc-cell">
+          <div className="lbl"><i data-lucide="calendar"></i> Deadline</div>
+          <div className={`val ${dl.tone}`}>{dl.text}</div>
+        </div>
+
+        <div className="nrc-progress">
+          <div className="row">
+            <span className="l">Progress</span>
+            <span className="v">{node.progress}%</span>
+          </div>
+          <div className="bar"><span style={{ width: `${node.progress}%` }} /></div>
+        </div>
+
+        <div className="nrc-actions">
+          {!editing && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
+              <i data-lucide="pencil"></i> Edit
+            </button>
+          )}
+          {editing && (
+            <button className="btn btn-primary btn-sm" onClick={() => setEditing(false)}>
+              <i data-lucide="check"></i> Done
+            </button>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="edit-panel">
+          <div className="field">
+            <label>Title</label>
+            <input className="inp" value={node.title} onChange={e => update({ title: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Status</label>
+            <select className="inp" value={node.status} onChange={e => setStatus(e.target.value)}>
+              <option value="notstarted">Not started</option>
+              <option value="progress">In progress</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Developer</label>
+            <input className="inp" value={node.developer || ''} onChange={e => update({ developer: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Deadline</label>
+            <input className="inp" type="date" value={node.deadline || ''} onChange={e => update({ deadline: e.target.value || null })} />
+          </div>
+
+          <div className="field full">
+            <label>Description</label>
+            <textarea className="inp" value={node.description || ''} onChange={e => update({ description: e.target.value })} />
+          </div>
+
+          <div className="field full">
+            <label>Progress · {node.progress}%</label>
+            <div className="slider-row">
+              <input
+                className="slider-inp" type="range" min="0" max="100" step="5"
+                value={node.progress}
+                style={{ '--p': `${node.progress}%` }}
+                onChange={e => update({ progress: parseInt(e.target.value, 10) })}
+              />
+              <span className="pct-tag">{node.progress}%</span>
+            </div>
+          </div>
+
+          <div className="field" style={{ gridColumn: '1 / 3' }}>
+            <label>Position on graph</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="inp" type="number" value={node.pos_x} onChange={e => update({ pos_x: parseInt(e.target.value, 10) || 0 })} placeholder="X" />
+              <input className="inp" type="number" value={node.pos_y} onChange={e => update({ pos_y: parseInt(e.target.value, 10) || 0 })} placeholder="Y" />
+            </div>
+          </div>
+
+          <div className="field" style={{ gridColumn: '3 / -1' }}>
+            <label>Connects to (downstream)</label>
+            {(() => {
+              const others = allNodes.filter(n => n.id !== node.id);
+              const q = connSearch.trim().toLowerCase();
+              const filtered = q ? others.filter(o => (o.title || '').toLowerCase().includes(q)) : others;
+              return (
+                <>
+                  {others.length > 6 && (
+                    <input
+                      className="inp"
+                      style={{ marginBottom: 6, fontSize: 12, padding: '6px 10px' }}
+                      placeholder="Search nodes…"
+                      value={connSearch}
+                      onChange={e => setConnSearch(e.target.value)}
+                    />
+                  )}
+                  <div className="conn-list">
+                    {others.length === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--txt-3)', padding: 4 }}>Add more nodes to draw connections.</div>
+                    )}
+                    {others.length > 0 && filtered.length === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--txt-3)', padding: 4 }}>No nodes match “{connSearch}”.</div>
+                    )}
+                    {filtered.map(other => (
+                      <label key={other.id}>
+                        <input
+                          type="checkbox"
+                          checked={(node.connections || []).includes(other.id)}
+                          onChange={() => toggleConnection(other.id)}
+                        /> {other.title}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          <div className="actions">
+            <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete this node?')) onDelete(node.id); }}>
+              <i data-lucide="trash-2"></i> Delete node
+            </button>
+            <span className="meta-time">Updated {new Date(node.updated_at).toLocaleString()}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const App = () => {
+  const [authed, setAuthed] = useState(!!window.api.getPw());
+  const [nodes, setNodes] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [toastMsg, setToastMsg] = useState(null);
+
+  useEffect(() => { window.lucide && window.lucide.createIcons(); }, [authed, nodes, filter, toastMsg]);
+
+  const flashToast = (msg, kind = 'ok') => {
+    setToastMsg({ msg, kind });
+    setTimeout(() => setToastMsg(null), 1800);
+  };
+
+  const load = async () => {
+    try { setNodes(await window.api.listNodes()); }
+    catch (e) { flashToast(e.message, 'error'); }
+  };
+
+  useEffect(() => { if (authed) load(); }, [authed]);
+
+  if (!authed) return <Login onAuth={() => setAuthed(true)} />;
+
+  const counts = {
+    all: nodes ? nodes.length : 0,
+    completed: nodes ? nodes.filter(n => n.status === 'completed').length : 0,
+    progress: nodes ? nodes.filter(n => n.status === 'progress').length : 0,
+    notstarted: nodes ? nodes.filter(n => n.status === 'notstarted').length : 0,
+  };
+  const visible = nodes ? (filter === 'all' ? nodes : nodes.filter(n => n.status === filter)) : [];
+
+  const onUpdate = async (id, patch) => {
+    // Optimistic update
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, ...patch } : n));
+    try {
+      const updated = await window.api.updateNode(id, patch);
+      setNodes(prev => prev.map(n => n.id === id ? updated : n));
+    } catch (e) {
+      load(); // revert
+      throw e;
+    }
+  };
+
+  const onDelete = async (id) => {
+    try {
+      await window.api.deleteNode(id);
+      setNodes(prev => prev.filter(n => n.id !== id));
+      flashToast('Node deleted');
+    } catch (e) { flashToast(e.message, 'error'); }
+  };
+
+  const onAdd = async (payload) => {
+    try {
+      // Auto-place new node to the right of existing ones
+      const maxX = nodes.reduce((m, n) => Math.max(m, n.pos_x), 0);
+      const created = await window.api.createNode({ ...payload, pos_x: maxX + 320, pos_y: 200 });
+      setNodes(prev => [...prev, created]);
+      flashToast('Node added');
+    } catch (e) { flashToast(e.message, 'error'); }
+  };
+
+  const onLogout = () => {
+    window.api.clearPw(); setAuthed(false);
+  };
+
+  const [layingOut, setLayingOut] = useState(false);
+  const onAutoLayout = async () => {
+    if (!nodes || nodes.length === 0 || layingOut) return;
+    if (!window.confirm(`Re-position all ${nodes.length} nodes based on their connections?`)) return;
+    setLayingOut(true);
+    const positions = computeAutoLayout(nodes);
+    try {
+      const updated = [];
+      for (const n of nodes) {
+        const p = positions[n.id];
+        if (!p || (p.x === n.pos_x && p.y === n.pos_y)) continue;
+        const u = await window.api.updateNode(n.id, { pos_x: p.x, pos_y: p.y });
+        updated.push(u);
+      }
+      if (updated.length) {
+        setNodes(prev => prev.map(n => updated.find(u => u.id === n.id) || n));
+        flashToast(`Auto-laid out ${updated.length} node${updated.length === 1 ? '' : 's'}`);
+      } else {
+        flashToast('Layout already clean');
+      }
+    } catch (e) { flashToast(e.message, 'error'); }
+    finally { setLayingOut(false); }
+  };
+
+  return (
+    <>
+      <Topbar onLogout={onLogout} />
+      <main className="main" data-screen-label="Admin · Manage nodes">
+        <div className="page-header">
+          <div>
+            <div className="page-eyebrow">Admin dashboard</div>
+            <h1 className="page-title">Manage Kaizen nodes</h1>
+            <p className="page-sub">Add, edit, and connect nodes. Changes save automatically and appear on the public graph in seconds.</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={onAutoLayout}
+              disabled={!nodes || nodes.length === 0 || layingOut}
+              title="Re-arrange every node into clean columns based on connections"
+            >
+              <i data-lucide="layout-grid"></i> {layingOut ? 'Laying out…' : 'Auto layout'}
+            </button>
+          </div>
+        </div>
+
+        <FilterBar filter={filter} setFilter={setFilter} counts={counts} />
+
+        <AddNode onAdd={onAdd} />
+
+        {nodes === null ? (
+          <div className="loading"><div className="spinner"></div> Loading…</div>
+        ) : visible.length === 0 ? (
+          <div className="card empty">
+            <i data-lucide="search-x"></i>
+            <div>No nodes match this filter.</div>
+          </div>
+        ) : (
+          <div className="node-list">
+            {visible.map(n => (
+              <NodeRow
+                key={n.id}
+                node={n}
+                allNodes={nodes}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                toast={flashToast}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+
+      {toastMsg && (
+        <div className={`toast ${toastMsg.kind === 'error' ? 'error' : ''}`}>
+          <i data-lucide={toastMsg.kind === 'error' ? 'alert-triangle' : 'check-circle-2'}></i>
+          {toastMsg.msg}
+        </div>
+      )}
+    </>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
