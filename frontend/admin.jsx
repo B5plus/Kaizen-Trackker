@@ -85,11 +85,16 @@ const Login = ({ onAuth }) => {
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true); setError('');
-    const ok = await window.api.checkPassword(pw);
-    setBusy(false);
-    if (!ok) return setError('Incorrect password.');
-    window.api.setPw(pw);
-    onAuth();
+    try {
+      const ok = await window.api.checkPassword(pw);
+      if (!ok) { setError('Incorrect password.'); return; }
+      window.api.setPw(pw);
+      onAuth();
+    } catch (err) {
+      setError('Could not reach server. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -191,28 +196,88 @@ const AddNode = ({ onAdd }) => {
 
 const NodeRow = ({ node, allNodes, onUpdate, onDelete, toast }) => {
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [connSearch, setConnSearch] = useState('');
-  useEffect(() => { window.lucide && window.lucide.createIcons(); }, [node, editing, connSearch]);
+  useEffect(() => { window.lucide && window.lucide.createIcons(); }, [node, editing, draft, connSearch]);
 
   const status = h.effectiveStatus(node);
   const dl = h.deadlineDisplay(node);
 
-  const update = async (patch) => {
-    try { await onUpdate(node.id, patch); }
-    catch (e) { toast(e.message, 'error'); }
+  const startEdit = () => {
+    setDraft({
+      title: node.title || '',
+      status: node.status || 'notstarted',
+      developer: node.developer || '',
+      deadline: node.deadline || '',
+      description: node.description || '',
+      progress: node.progress ?? 0,
+      pos_x: node.pos_x || 0,
+      pos_y: node.pos_y || 0,
+      connections: [...(node.connections || [])],
+    });
+    setEditing(true);
+    setConnSearch('');
   };
 
-  const setStatus = (st) => {
-    const patch = { status: st };
-    if (st === 'completed') patch.progress = 100;
-    if (st === 'notstarted') patch.progress = 0;
-    update(patch);
+  const cancelEdit = () => {
+    setEditing(false);
+    setDraft(null);
+    setConnSearch('');
   };
 
-  const toggleConnection = (id) => {
-    const set = new Set(node.connections || []);
+  const setField = (k, v) => setDraft(d => ({ ...d, [k]: v }));
+
+  const setStatusDraft = (st) => setDraft(d => {
+    const next = { ...d, status: st };
+    if (st === 'completed') next.progress = 100;
+    if (st === 'notstarted') next.progress = 0;
+    return next;
+  });
+
+  const toggleConnection = (id) => setDraft(d => {
+    const set = new Set(d.connections);
     if (set.has(id)) set.delete(id); else set.add(id);
-    update({ connections: [...set] });
+    return { ...d, connections: [...set] };
+  });
+
+  const isDirty = draft && (
+    draft.title !== (node.title || '') ||
+    draft.status !== (node.status || 'notstarted') ||
+    draft.developer !== (node.developer || '') ||
+    (draft.deadline || '') !== (node.deadline || '') ||
+    draft.description !== (node.description || '') ||
+    draft.progress !== (node.progress ?? 0) ||
+    draft.pos_x !== (node.pos_x || 0) ||
+    draft.pos_y !== (node.pos_y || 0) ||
+    JSON.stringify(draft.connections) !== JSON.stringify(node.connections || [])
+  );
+
+  const saveEdit = async () => {
+    if (!draft || saving) return;
+    if (!isDirty) { cancelEdit(); return; }
+    if (!draft.title.trim()) { toast('Title cannot be empty', 'error'); return; }
+    setSaving(true);
+    try {
+      const patch = {
+        title: draft.title.trim(),
+        status: draft.status,
+        developer: draft.developer.trim(),
+        deadline: draft.deadline || null,
+        description: draft.description,
+        progress: draft.progress,
+        pos_x: draft.pos_x,
+        pos_y: draft.pos_y,
+        connections: draft.connections,
+      };
+      await onUpdate(node.id, patch);
+      toast('Saved', 'ok');
+      cancelEdit();
+    } catch (e) {
+      toast(e.message || 'Save failed', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -223,6 +288,11 @@ const NodeRow = ({ node, allNodes, onUpdate, onDelete, toast }) => {
             <span className={`k-badge ${status}`}>
               <span className="dot"></span>{h.statusLabel(status)}
             </span>
+            {editing && isDirty && (
+              <span className="k-badge progress" style={{ marginLeft: 6 }}>
+                <span className="dot"></span>Unsaved changes
+              </span>
+            )}
           </div>
           <div className="title">{node.title}</div>
           {node.description && <div className="desc">{node.description}</div>}
@@ -251,27 +321,32 @@ const NodeRow = ({ node, allNodes, onUpdate, onDelete, toast }) => {
 
         <div className="nrc-actions">
           {!editing && (
-            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
+            <button className="btn btn-secondary btn-sm" onClick={startEdit}>
               <i data-lucide="pencil"></i> Edit
             </button>
           )}
           {editing && (
-            <button className="btn btn-primary btn-sm" onClick={() => setEditing(false)}>
-              <i data-lucide="check"></i> Done
-            </button>
+            <>
+              <button className="btn btn-secondary btn-sm" onClick={cancelEdit} disabled={saving}>
+                <i data-lucide="x"></i> Cancel
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving || !isDirty}>
+                <i data-lucide="check"></i> {saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
           )}
         </div>
       </div>
 
-      {editing && (
+      {editing && draft && (
         <div className="edit-panel">
           <div className="field">
             <label>Title</label>
-            <input className="inp" value={node.title} onChange={e => update({ title: e.target.value })} />
+            <input className="inp" value={draft.title} onChange={e => setField('title', e.target.value)} />
           </div>
           <div className="field">
             <label>Status</label>
-            <select className="inp" value={node.status} onChange={e => setStatus(e.target.value)}>
+            <select className="inp" value={draft.status} onChange={e => setStatusDraft(e.target.value)}>
               <option value="notstarted">Not started</option>
               <option value="progress">In progress</option>
               <option value="completed">Completed</option>
@@ -279,36 +354,36 @@ const NodeRow = ({ node, allNodes, onUpdate, onDelete, toast }) => {
           </div>
           <div className="field">
             <label>Developer</label>
-            <input className="inp" value={node.developer || ''} onChange={e => update({ developer: e.target.value })} />
+            <input className="inp" value={draft.developer} onChange={e => setField('developer', e.target.value)} />
           </div>
           <div className="field">
             <label>Deadline</label>
-            <input className="inp" type="date" value={node.deadline || ''} onChange={e => update({ deadline: e.target.value || null })} />
+            <input className="inp" type="date" value={draft.deadline} onChange={e => setField('deadline', e.target.value)} />
           </div>
 
           <div className="field full">
             <label>Description</label>
-            <textarea className="inp" value={node.description || ''} onChange={e => update({ description: e.target.value })} />
+            <textarea className="inp" value={draft.description} onChange={e => setField('description', e.target.value)} />
           </div>
 
           <div className="field full">
-            <label>Progress · {node.progress}%</label>
+            <label>Progress · {draft.progress}%</label>
             <div className="slider-row">
               <input
                 className="slider-inp" type="range" min="0" max="100" step="5"
-                value={node.progress}
-                style={{ '--p': `${node.progress}%` }}
-                onChange={e => update({ progress: parseInt(e.target.value, 10) })}
+                value={draft.progress}
+                style={{ '--p': `${draft.progress}%` }}
+                onChange={e => setField('progress', parseInt(e.target.value, 10))}
               />
-              <span className="pct-tag">{node.progress}%</span>
+              <span className="pct-tag">{draft.progress}%</span>
             </div>
           </div>
 
           <div className="field" style={{ gridColumn: '1 / 3' }}>
             <label>Position on graph</label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <input className="inp" type="number" value={node.pos_x} onChange={e => update({ pos_x: parseInt(e.target.value, 10) || 0 })} placeholder="X" />
-              <input className="inp" type="number" value={node.pos_y} onChange={e => update({ pos_y: parseInt(e.target.value, 10) || 0 })} placeholder="Y" />
+              <input className="inp" type="number" value={draft.pos_x} onChange={e => setField('pos_x', parseInt(e.target.value, 10) || 0)} placeholder="X" />
+              <input className="inp" type="number" value={draft.pos_y} onChange={e => setField('pos_y', parseInt(e.target.value, 10) || 0)} placeholder="Y" />
             </div>
           </div>
 
@@ -340,7 +415,7 @@ const NodeRow = ({ node, allNodes, onUpdate, onDelete, toast }) => {
                       <label key={other.id}>
                         <input
                           type="checkbox"
-                          checked={(node.connections || []).includes(other.id)}
+                          checked={draft.connections.includes(other.id)}
                           onChange={() => toggleConnection(other.id)}
                         /> {other.title}
                       </label>
@@ -352,10 +427,10 @@ const NodeRow = ({ node, allNodes, onUpdate, onDelete, toast }) => {
           </div>
 
           <div className="actions">
-            <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete this node?')) onDelete(node.id); }}>
+            <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete this node?')) onDelete(node.id); }} disabled={saving}>
               <i data-lucide="trash-2"></i> Delete node
             </button>
-            <span className="meta-time">Updated {new Date(node.updated_at).toLocaleString()}</span>
+            <span className="meta-time">Last saved {new Date(node.updated_at).toLocaleString()}</span>
           </div>
         </div>
       )}
