@@ -52,7 +52,6 @@ function isRateLimited(ip) {
   return false;
 }
 
-// Purge stale entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [ip, times] of authAttempts) {
@@ -62,7 +61,7 @@ setInterval(() => {
   }
 }, 300_000).unref();
 
-// --- Input sanitization helpers ---
+// --- Input sanitization ---
 const sanitizeStr = (v, max = 500) =>
   typeof v === "string" ? v.trim().slice(0, max) : "";
 
@@ -79,6 +78,9 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
+// Wrap async route handlers so Express 4 catches their rejections
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 // --- Routes ---
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
@@ -91,16 +93,16 @@ app.post("/api/auth/check", (req, res) => {
   res.status(401).json({ ok: false });
 });
 
-app.get("/api/nodes", async (_req, res) => {
+app.get("/api/nodes", wrap(async (_req, res) => {
   const { data, error } = await supabase
     .from("nodes")
     .select("*")
     .order("created_at", { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
-});
+}));
 
-app.post("/api/nodes", requireAdmin, async (req, res) => {
+app.post("/api/nodes", requireAdmin, wrap(async (req, res) => {
   const body = req.body || {};
   const title = sanitizeStr(body.title, 200);
   const insert = {
@@ -119,20 +121,20 @@ app.post("/api/nodes", requireAdmin, async (req, res) => {
   const { data, error } = await supabase.from("nodes").insert(insert).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json(data);
-});
+}));
 
-app.patch("/api/nodes/:id", requireAdmin, async (req, res) => {
+app.patch("/api/nodes/:id", requireAdmin, wrap(async (req, res) => {
   const body = req.body || {};
   const patch = {};
 
-  if (body.title !== undefined) patch.title = sanitizeStr(body.title, 200) || "New node";
+  if (body.title !== undefined)       patch.title       = sanitizeStr(body.title, 200) || "New node";
   if (body.description !== undefined) patch.description = sanitizeStr(body.description, 2000);
-  if (body.developer !== undefined) patch.developer = sanitizeStr(body.developer, 100);
-  if (body.deadline !== undefined) patch.deadline = sanitizeDate(body.deadline);
+  if (body.developer !== undefined)   patch.developer   = sanitizeStr(body.developer, 100);
+  if (body.deadline !== undefined)    patch.deadline    = sanitizeDate(body.deadline);
   if (body.status !== undefined && VALID_STATUS.has(body.status)) patch.status = body.status;
-  if (body.progress !== undefined) patch.progress = clampPct(body.progress);
-  if (Number.isFinite(body.pos_x)) patch.pos_x = Math.round(body.pos_x);
-  if (Number.isFinite(body.pos_y)) patch.pos_y = Math.round(body.pos_y);
+  if (body.progress !== undefined)    patch.progress    = clampPct(body.progress);
+  if (Number.isFinite(body.pos_x))    patch.pos_x       = Math.round(body.pos_x);
+  if (Number.isFinite(body.pos_y))    patch.pos_y       = Math.round(body.pos_y);
   if (Array.isArray(body.connections)) {
     patch.connections = body.connections.filter(id => typeof id === "string").slice(0, 100);
   }
@@ -143,11 +145,11 @@ app.patch("/api/nodes/:id", requireAdmin, async (req, res) => {
 
   // Bidirectional progress <-> status sync
   if ("progress" in patch && !("status" in patch)) {
-    if (patch.progress === 100) patch.status = "completed";
-    else if (patch.progress > 0) patch.status = "progress";
-    else patch.status = "notstarted";
+    if (patch.progress === 100)     patch.status = "completed";
+    else if (patch.progress > 0)    patch.status = "progress";
+    else                            patch.status = "notstarted";
   } else if ("status" in patch && !("progress" in patch)) {
-    if (patch.status === "completed") patch.progress = 100;
+    if (patch.status === "completed")   patch.progress = 100;
     else if (patch.status === "notstarted") patch.progress = 0;
   }
 
@@ -159,18 +161,37 @@ app.patch("/api/nodes/:id", requireAdmin, async (req, res) => {
     .single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
-});
+}));
 
-app.delete("/api/nodes/:id", requireAdmin, async (req, res) => {
+app.delete("/api/nodes/:id", requireAdmin, wrap(async (req, res) => {
   const { error } = await supabase.from("nodes").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
-});
+}));
 
 function clampPct(v) {
   const n = Math.round(Number(v));
   return Number.isNaN(n) ? 0 : Math.max(0, Math.min(100, n));
 }
+
+// --- Global error handler (catches JSON parse errors + anything from wrap()) ---
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  // Malformed JSON body
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "Invalid JSON in request body" });
+  }
+  console.error("[error]", err.message || err);
+  res.status(500).json({ error: "Internal server error" });
+});
+
+// Keep the process alive on unexpected errors rather than crashing
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+});
 
 app.listen(PORT, () => {
   console.log(`✓ Trackker backend listening on http://localhost:${PORT}`);
