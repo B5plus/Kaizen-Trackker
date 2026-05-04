@@ -1531,6 +1531,18 @@ select.inp {
   color: #fff;
 }
 
+/* ============================================================ Add-node form */
+.add-node-form {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1fr auto;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: rgba(88, 168, 255, 0.04);
+  border: 1px dashed rgba(88, 168, 255, 0.28);
+  border-radius: 10px;
+}
+
 /* ============================================================ Empty / loading */
 .empty {
   text-align: center;
@@ -1539,10 +1551,11 @@ select.inp {
   font-size: 13px;
 }
 .empty .lucide {
+  display: block;
   width: 32px;
   height: 32px;
   stroke-width: 1.5;
-  margin-bottom: 10px;
+  margin: 0 auto 10px;
   color: var(--txt-4);
 }
 
@@ -1645,5 +1658,36 @@ select.inp {
   .graph-wrap {
     height: 520px;
     min-height: 0;
+  }
+  .add-node-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .add-node-form > .field:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Small phones */
+@media (max-width: 480px) {
+  .add-node-form {
+    grid-template-columns: 1fr;
+  }
+  .add-node-form > .field:last-child {
+    grid-column: 1;
+  }
+  .edit-panel {
+    grid-template-columns: 1fr;
+  }
+  .edit-panel .full,
+  .edit-panel .actions,
+  .edit-panel [style*="gridColumn"] {
+    grid-column: 1 !important;
+  }
+  .nav-tabs a span,
+  .view-pill {
+    display: none;
+  }
+  .kpi-grid.compact .kpi {
+    min-width: 100px;
   }
 }

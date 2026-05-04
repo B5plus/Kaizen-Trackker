@@ -25,9 +25,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "64kb" }));
 
-// Static frontend — disable cache for HTML/JS/JSX so deploys are picked up immediately
+// Static frontend — no-cache for HTML/JS so deploys are picked up immediately
 app.use(
   express.static(path.join(__dirname, "..", "frontend"), {
     setHeaders: (res, filePath) => {
@@ -38,19 +38,56 @@ app.use(
   }),
 );
 
+// --- Simple in-memory rate limiter (auth endpoint only) ---
+const authAttempts = new Map();
+const RATE_LIMIT = 10;
+const RATE_WINDOW_MS = 60_000;
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const recent = (authAttempts.get(ip) || []).filter(t => now - t < RATE_WINDOW_MS);
+  if (recent.length >= RATE_LIMIT) return true;
+  recent.push(now);
+  authAttempts.set(ip, recent);
+  return false;
+}
+
+// Purge stale entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, times] of authAttempts) {
+    const recent = times.filter(t => now - t < RATE_WINDOW_MS);
+    if (recent.length === 0) authAttempts.delete(ip);
+    else authAttempts.set(ip, recent);
+  }
+}, 300_000).unref();
+
+// --- Input sanitization helpers ---
+const sanitizeStr = (v, max = 500) =>
+  typeof v === "string" ? v.trim().slice(0, max) : "";
+
+const sanitizeDate = (v) =>
+  typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()) ? v.trim() : null;
+
+const VALID_STATUS = new Set(["notstarted", "progress", "completed"]);
+
 // --- Auth middleware ---
 const requireAdmin = (req, res, next) => {
-  const pw = req.headers["x-admin-password"];
-  if (pw !== ADMIN_PASSWORD) {
+  if (req.headers["x-admin-password"] !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: "Invalid password" });
   }
   next();
 };
 
 // --- Routes ---
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
 app.post("/api/auth/check", (req, res) => {
-  const pw = req.body?.password;
-  if (pw === ADMIN_PASSWORD) return res.json({ ok: true });
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  if (isRateLimited(ip)) {
+    return res.status(429).json({ error: "Too many attempts. Try again in a minute." });
+  }
+  if (req.body?.password === ADMIN_PASSWORD) return res.json({ ok: true });
   res.status(401).json({ ok: false });
 });
 
@@ -65,49 +102,55 @@ app.get("/api/nodes", async (_req, res) => {
 
 app.post("/api/nodes", requireAdmin, async (req, res) => {
   const body = req.body || {};
+  const title = sanitizeStr(body.title, 200);
   const insert = {
-    title: body.title || "New node",
-    description: body.description || "",
-    developer: body.developer || "Unassigned",
-    deadline: body.deadline || null,
-    status: body.status || "notstarted",
+    title: title || "New node",
+    description: sanitizeStr(body.description, 2000),
+    developer: sanitizeStr(body.developer, 100) || "Unassigned",
+    deadline: sanitizeDate(body.deadline),
+    status: VALID_STATUS.has(body.status) ? body.status : "notstarted",
     progress: clampPct(body.progress),
-    pos_x: Number.isFinite(body.pos_x) ? body.pos_x : 200,
-    pos_y: Number.isFinite(body.pos_y) ? body.pos_y : 200,
-    connections: Array.isArray(body.connections) ? body.connections : [],
+    pos_x: Number.isFinite(body.pos_x) ? Math.round(body.pos_x) : 200,
+    pos_y: Number.isFinite(body.pos_y) ? Math.round(body.pos_y) : 200,
+    connections: Array.isArray(body.connections)
+      ? body.connections.filter(id => typeof id === "string").slice(0, 100)
+      : [],
   };
-  const { data, error } = await supabase
-    .from("nodes")
-    .insert(insert)
-    .select()
-    .single();
+  const { data, error } = await supabase.from("nodes").insert(insert).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json(data);
 });
 
 app.patch("/api/nodes/:id", requireAdmin, async (req, res) => {
-  const allowed = [
-    "title",
-    "description",
-    "developer",
-    "deadline",
-    "status",
-    "progress",
-    "pos_x",
-    "pos_y",
-    "connections",
-  ];
+  const body = req.body || {};
   const patch = {};
-  for (const k of allowed) {
-    if (req.body[k] !== undefined) patch[k] = req.body[k];
+
+  if (body.title !== undefined) patch.title = sanitizeStr(body.title, 200) || "New node";
+  if (body.description !== undefined) patch.description = sanitizeStr(body.description, 2000);
+  if (body.developer !== undefined) patch.developer = sanitizeStr(body.developer, 100);
+  if (body.deadline !== undefined) patch.deadline = sanitizeDate(body.deadline);
+  if (body.status !== undefined && VALID_STATUS.has(body.status)) patch.status = body.status;
+  if (body.progress !== undefined) patch.progress = clampPct(body.progress);
+  if (Number.isFinite(body.pos_x)) patch.pos_x = Math.round(body.pos_x);
+  if (Number.isFinite(body.pos_y)) patch.pos_y = Math.round(body.pos_y);
+  if (Array.isArray(body.connections)) {
+    patch.connections = body.connections.filter(id => typeof id === "string").slice(0, 100);
   }
-  if ("progress" in patch) {
-    patch.progress = clampPct(patch.progress);
-    // Auto-sync status when progress hits 100 / 0
-    if (patch.progress === 100 && !patch.status) patch.status = "completed";
-    if (patch.progress > 0 && patch.progress < 100 && !patch.status)
-      patch.status = "progress";
+
+  if (Object.keys(patch).length === 0) {
+    return res.status(400).json({ error: "No valid fields to update" });
   }
+
+  // Bidirectional progress <-> status sync
+  if ("progress" in patch && !("status" in patch)) {
+    if (patch.progress === 100) patch.status = "completed";
+    else if (patch.progress > 0) patch.status = "progress";
+    else patch.status = "notstarted";
+  } else if ("status" in patch && !("progress" in patch)) {
+    if (patch.status === "completed") patch.progress = 100;
+    else if (patch.status === "notstarted") patch.progress = 0;
+  }
+
   const { data, error } = await supabase
     .from("nodes")
     .update(patch)
@@ -119,23 +162,18 @@ app.patch("/api/nodes/:id", requireAdmin, async (req, res) => {
 });
 
 app.delete("/api/nodes/:id", requireAdmin, async (req, res) => {
-  const { error } = await supabase
-    .from("nodes")
-    .delete()
-    .eq("id", req.params.id);
+  const { error } = await supabase.from("nodes").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 
 function clampPct(v) {
   const n = Math.round(Number(v));
-  if (Number.isNaN(n)) return 0;
-  return Math.max(0, Math.min(100, n));
+  return Number.isNaN(n) ? 0 : Math.max(0, Math.min(100, n));
 }
 
 app.listen(PORT, () => {
   console.log(`✓ Trackker backend listening on http://localhost:${PORT}`);
   console.log(`  Public:  http://localhost:${PORT}/`);
   console.log(`  Admin:   http://localhost:${PORT}/admin.html`);
-  console.log(`  Update:  http://localhost:${PORT}/update.html`);
 });

@@ -1,16 +1,19 @@
-// Trackker — shared API helpers (loaded as a plain script, exposes window.api)
-
+// Trackker — shared API helpers (exposes window.api and window.helpers)
 (function () {
-  const API_BASE = ''; // same origin
+  const API_BASE = '';
   const PW_KEY = 'trackker.adminPw';
 
   const getPw = () => sessionStorage.getItem(PW_KEY) || '';
   const setPw = (pw) => sessionStorage.setItem(PW_KEY, pw);
   const clearPw = () => sessionStorage.removeItem(PW_KEY);
 
+  async function safeJson(r) {
+    try { return await r.json(); } catch { return {}; }
+  }
+
   async function listNodes() {
     const r = await fetch(`${API_BASE}/api/nodes`);
-    if (!r.ok) throw new Error('Failed to load nodes');
+    if (!r.ok) throw new Error(`Failed to load nodes (${r.status})`);
     return r.json();
   }
 
@@ -20,6 +23,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pw }),
     });
+    if (r.status === 429) throw new Error('Too many attempts. Please wait a minute.');
     return r.ok;
   }
 
@@ -29,7 +33,7 @@
       headers: { 'Content-Type': 'application/json', 'x-admin-password': getPw() },
       body: JSON.stringify(body),
     });
-    if (!r.ok) throw new Error((await r.json()).error || 'Create failed');
+    if (!r.ok) { const j = await safeJson(r); throw new Error(j.error || `Create failed (${r.status})`); }
     return r.json();
   }
 
@@ -39,7 +43,7 @@
       headers: { 'Content-Type': 'application/json', 'x-admin-password': getPw() },
       body: JSON.stringify(patch),
     });
-    if (!r.ok) throw new Error((await r.json()).error || 'Update failed');
+    if (!r.ok) { const j = await safeJson(r); throw new Error(j.error || `Update failed (${r.status})`); }
     return r.json();
   }
 
@@ -48,19 +52,16 @@
       method: 'DELETE',
       headers: { 'x-admin-password': getPw() },
     });
-    if (!r.ok) throw new Error('Delete failed');
+    if (!r.ok) { const j = await safeJson(r); throw new Error(j.error || `Delete failed (${r.status})`); }
     return r.json();
   }
 
   window.api = { listNodes, checkPassword, createNode, updateNode, deleteNode, getPw, setPw, clearPw };
 
-  // Shared helpers
   window.helpers = {
-    TODAY: new Date(),
     fmtDate(iso) {
       if (!iso) return '—';
-      const d = new Date(iso + 'T00:00:00');
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     },
     daysUntil(iso) {
       if (!iso) return Infinity;
@@ -73,7 +74,7 @@
       if (node.status === 'completed') return { text: this.fmtDate(node.deadline), tone: 'ok' };
       if (days < 0) return { text: `${Math.abs(days)}d overdue`, tone: 'danger' };
       if (days === 0) return { text: 'Due today', tone: 'warn' };
-      if (days <= 7) return { text: `In ${days} days`, tone: 'warn' };
+      if (days <= 7) return { text: `In ${days}d`, tone: 'warn' };
       return { text: this.fmtDate(node.deadline), tone: 'muted' };
     },
     effectiveStatus(node) {
