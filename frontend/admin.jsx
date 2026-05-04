@@ -368,6 +368,7 @@ const App = () => {
   const [nodes, setNodes] = useState(null);
   const [filter, setFilter] = useState('all');
   const [toastMsg, setToastMsg] = useState(null);
+  const [layingOut, setLayingOut] = useState(false);
 
   useEffect(() => { window.lucide && window.lucide.createIcons(); }, [authed, nodes, filter, toastMsg]);
 
@@ -427,7 +428,6 @@ const App = () => {
     window.api.clearPw(); setAuthed(false);
   };
 
-  const [layingOut, setLayingOut] = useState(false);
   const onAutoLayout = async () => {
     if (!nodes || nodes.length === 0 || layingOut) return;
     if (!window.confirm(`Re-position all ${nodes.length} nodes based on their connections?`)) return;
