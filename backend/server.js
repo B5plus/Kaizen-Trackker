@@ -27,8 +27,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Static frontend
-app.use(express.static(path.join(__dirname, "..", "frontend")));
+// Static frontend — disable cache for HTML/JS/JSX so deploys are picked up immediately
+app.use(
+  express.static(path.join(__dirname, "..", "frontend"), {
+    setHeaders: (res, filePath) => {
+      if (/\.(html|js|jsx)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-store, must-revalidate");
+      }
+    },
+  }),
+);
 
 // --- Auth middleware ---
 const requireAdmin = (req, res, next) => {
